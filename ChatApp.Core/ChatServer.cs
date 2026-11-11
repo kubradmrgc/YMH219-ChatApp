@@ -12,6 +12,9 @@ public sealed class ChatServer : IDisposable
     /// <summary>Bağlanan istemcinin kullanıcı adını göndermesi için tanınan süre.</summary>
     public static readonly TimeSpan JoinTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>Tek bir istemciye mesaj yazmak için beklenecek en uzun süre.</summary>
+    public static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
+
     private readonly object sync = new();
     private readonly Dictionary<string, Session> sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Task> handlerTasks = new();
@@ -238,10 +241,28 @@ public sealed class ChatServer : IDisposable
         await channel.SendAsync(ChatMessage.Reject(reason), token).ConfigureAwait(false);
     }
 
-    private Task HandleMessageAsync(Session session, ChatMessage message)
+    private async Task HandleMessageAsync(Session session, ChatMessage message)
     {
-        OnLog($"{session.Info.UserName}: desteklenmeyen mesaj türü ({message.Type}).");
-        return Task.CompletedTask;
+        string from = session.Info.UserName;
+        switch (message.Type)
+        {
+            case MessageType.Chat:
+                if (!UserNameRules.IsValidMessage(message.Text, out string error))
+                {
+                    await TrySendAsync(session, ChatMessage.System(error)).ConfigureAwait(false);
+                    return;
+                }
+
+                // Gönderen adı ve zaman sunucuda atanır; istemcinin gönderdiği değerlere güvenilmez.
+                var chat = ChatMessage.Chat(from, message.Text!.Trim());
+                OnLog($"[Genel] {from}: {chat.Text}");
+                await BroadcastAsync(chat).ConfigureAwait(false);
+                break;
+
+            default:
+                OnLog($"{from}: desteklenmeyen mesaj türü ({message.Type}).");
+                break;
+        }
     }
 
     private async Task RemoveSessionAsync(Session session)
@@ -280,12 +301,19 @@ public sealed class ChatServer : IDisposable
         await Task.WhenAll(targets.Select(s => TrySendAsync(s, message))).ConfigureAwait(false);
     }
 
-    private async Task<bool> TrySendAsync(Session session, ChatMessage message)
+    private static async Task<bool> TrySendAsync(Session session, ChatMessage message)
     {
+        using var timeout = new CancellationTokenSource(SendTimeout);
         try
         {
-            await session.Channel.SendAsync(message).ConfigureAwait(false);
+            await session.Channel.SendAsync(message, timeout.Token).ConfigureAwait(false);
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            // Mesajları okumayan istemci diğerlerini bekletmesin diye bağlantısı kapatılır.
+            session.Channel.Dispose();
+            return false;
         }
         catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
         {

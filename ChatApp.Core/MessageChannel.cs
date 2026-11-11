@@ -17,7 +17,7 @@ public sealed class MessageChannel : IDisposable
     private readonly StreamReader reader;
     private readonly StreamWriter writer;
     private readonly SemaphoreSlim writeLock = new(1, 1);
-    private bool disposed;
+    private int disposed;
 
     public MessageChannel(TcpClient client)
     {
@@ -65,22 +65,22 @@ public sealed class MessageChannel : IDisposable
 
     public void Dispose()
     {
-        if (disposed)
+        if (Interlocked.Exchange(ref disposed, 1) == 1)
         {
             return;
         }
 
-        disposed = true;
+        // Önce soket kapatılır; böylece bekleyen okuma/yazma işlemleri hata ile sonlanır.
+        // writeLock bilerek Dispose edilmez: Dispose edilen SemaphoreSlim bekleyen görevleri serbest bırakmaz.
+        client.Dispose();
         reader.Dispose();
         try
         {
             writer.Dispose();
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
         {
-            // Bağlantı zaten koptuysa tampondaki veri yazılamaz; kapatmaya devam edilir.
+            // Bağlantı kapalı olduğundan tampondaki veri yazılamaz; kapatmaya devam edilir.
         }
-        client.Dispose();
-        writeLock.Dispose();
     }
 }

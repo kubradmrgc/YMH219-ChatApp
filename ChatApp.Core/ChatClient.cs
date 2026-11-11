@@ -89,6 +89,30 @@ public sealed class ChatClient : IDisposable
         _ = ReadLoopAsync(newChannel, cts.Token);
     }
 
+    /// <summary>Herkese açık sohbet mesajı gönderir. Hata durumunda <see cref="ChatException"/> fırlatır.</summary>
+    public Task SendChatAsync(string text)
+    {
+        return SendValidatedAsync(text, t => ChatMessage.Chat(UserName!, t));
+    }
+
+    private async Task SendValidatedAsync(string text, Func<string, ChatMessage> create)
+    {
+        MessageChannel current = channel ?? throw new ChatException("Sunucuya bağlı değilsiniz.");
+        if (!UserNameRules.IsValidMessage(text, out string error))
+        {
+            throw new ChatException(error);
+        }
+
+        try
+        {
+            await current.SendAsync(create(text.Trim())).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
+        {
+            throw new ChatException("Mesaj gönderilemedi: sunucu ile bağlantı koptu.", ex);
+        }
+    }
+
     /// <summary>Bağlantıyı düzgün şekilde kapatır (sunucuya ayrılma mesajı gönderir).</summary>
     public async Task DisconnectAsync()
     {

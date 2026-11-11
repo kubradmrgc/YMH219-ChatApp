@@ -94,10 +94,17 @@ public class ClientForm : Form
 
         recipientCombo.Items.Add(UserNameRules.Everyone);
         recipientCombo.SelectedIndex = 0;
-        sendButton.Enabled = false;
-        messageInput.Enabled = false;
 
         connectButton.Click += async (_, _) => await ConnectAsync();
+        sendButton.Click += async (_, _) => await SendAsync();
+        messageInput.KeyDown += async (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                await SendAsync();
+            }
+        };
         disconnectButton.Click += async (_, _) => await client.DisconnectAsync();
         userNameInput.KeyDown += async (_, e) =>
         {
@@ -132,6 +139,9 @@ public class ClientForm : Form
         {
             await client.ConnectAsync(host, port, userNameInput.Text);
             AppendSystem($"{host}:{port} sunucusuna \"{client.UserName}\" olarak bağlanıldı.", SystemColor);
+            connecting = false;
+            UpdateState();
+            messageInput.Focus();
         }
         catch (ChatException ex)
         {
@@ -145,10 +155,34 @@ public class ClientForm : Form
         }
     }
 
+    private async Task SendAsync()
+    {
+        string text = messageInput.Text;
+        if (!client.IsConnected || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        try
+        {
+            await client.SendChatAsync(text);
+            messageInput.Clear();
+        }
+        catch (ChatException ex)
+        {
+            AppendSystem(ex.Message, ErrorColor);
+        }
+
+        messageInput.Focus();
+    }
+
     private void HandleMessage(ChatMessage message)
     {
         switch (message.Type)
         {
+            case MessageType.Chat:
+                AppendChat(message.Timestamp, message.From ?? "?", message.Text ?? string.Empty);
+                break;
             case MessageType.UserList:
                 UpdateUsers(message.Users ?? new List<string>());
                 break;
@@ -195,6 +229,8 @@ public class ClientForm : Form
         userNameInput.Enabled = idle;
         connectButton.Enabled = idle;
         disconnectButton.Enabled = connected;
+        messageInput.Enabled = connected;
+        sendButton.Enabled = connected;
 
         if (connecting)
         {
@@ -214,6 +250,26 @@ public class ClientForm : Form
             statusIndicator.BackColor = Color.DimGray;
             statusLabel.Text = "Bağlı değil";
         }
+    }
+
+    private void AppendChat(DateTime time, string from, string text)
+    {
+        AppendText($"[{time:HH:mm:ss}] ", Color.DarkGray, FontStyle.Regular);
+        AppendText($"{from}: ", ColorForUser(from), FontStyle.Bold);
+        AppendText(text + Environment.NewLine, Color.Black, FontStyle.Regular);
+        ScrollToEnd();
+    }
+
+    private Color ColorForUser(string userName)
+    {
+        if (string.Equals(userName, client.UserName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Color.RoyalBlue;
+        }
+
+        Color[] palette = { Color.SeaGreen, Color.DarkOrchid, Color.Chocolate, Color.Teal, Color.Crimson, Color.DarkGoldenrod };
+        int hash = userName.ToLowerInvariant().Aggregate(17, (h, c) => unchecked(h * 31 + c));
+        return palette[(hash & int.MaxValue) % palette.Length];
     }
 
     private void AppendSystem(string text, Color color, DateTime? time = null)
