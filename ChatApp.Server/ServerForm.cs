@@ -41,7 +41,7 @@ public class ServerForm : Form
     {
         Name = "logList",
         Dock = DockStyle.Fill,
-        Font = new Font("Consolas", 9.5f),
+        Font = new Font("Consolas", 9f),
         IntegralHeight = false,
         HorizontalScrollbar = true
     };
@@ -54,7 +54,7 @@ public class ServerForm : Form
     public ServerForm()
     {
         Text = "YMH219 - Chat Sunucusu";
-        ClientSize = new Size(960, 560);
+        ClientSize = new Size(1100, 560);
         MinimumSize = new Size(820, 420);
         StartPosition = FormStartPosition.CenterScreen;
 
