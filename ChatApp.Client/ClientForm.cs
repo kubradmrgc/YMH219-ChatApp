@@ -9,6 +9,7 @@ public class ClientForm : Form
 {
     private static readonly Color SystemColor = Color.Gray;
     private static readonly Color ErrorColor = Color.Firebrick;
+    private static readonly Color PrivateColor = Color.DarkMagenta;
 
     private readonly ChatClient client = new();
 
@@ -39,12 +40,20 @@ public class ClientForm : Form
     private readonly ListBox usersList = new() { Name = "usersList", Dock = DockStyle.Fill, IntegralHeight = false, Font = new Font("Segoe UI", 10f) };
     private readonly GroupBox usersGroup = new() { Text = "Çevrimiçi (0)", Dock = DockStyle.Fill, Padding = new Padding(8) };
     private readonly ComboBox recipientCombo = new() { Name = "recipientCombo", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
-    private readonly TextBox messageInput = new() { Name = "messageInput", Dock = DockStyle.Fill, MaxLength = UserNameRules.MaxMessageLength, Font = new Font("Segoe UI", 10.5f) };
+    private readonly TextBox messageInput = new()
+    {
+        Name = "messageInput",
+        Dock = DockStyle.Fill,
+        MaxLength = UserNameRules.MaxMessageLength,
+        Font = new Font("Segoe UI", 10.5f),
+        PlaceholderText = "Mesajınızı yazıp Enter'a basın..."
+    };
     private readonly Button sendButton = CreateButton("sendButton", "Gönder");
     private readonly Button saveHistoryButton = CreateButton("saveHistoryButton", "Geçmişi Kaydet");
     private readonly StatusStrip statusStrip = new();
     private readonly ToolStripStatusLabel statusLabel = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft, Text = "Bağlı değil" };
 
+    private readonly List<string> onlineUsers = new();
     private bool connecting;
     private bool closingAfterDisconnect;
 
@@ -106,6 +115,8 @@ public class ClientForm : Form
             }
         };
         disconnectButton.Click += async (_, _) => await client.DisconnectAsync();
+        usersList.DoubleClick += (_, _) => SelectRecipientFromList();
+        recipientCombo.SelectedIndexChanged += (_, _) => UpdateSendHint();
         userNameInput.KeyDown += async (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -163,9 +174,17 @@ public class ClientForm : Form
             return;
         }
 
+        string? recipient = SelectedRecipient;
         try
         {
-            await client.SendChatAsync(text);
+            if (recipient is null)
+            {
+                await client.SendChatAsync(text);
+            }
+            else
+            {
+                await client.SendPrivateAsync(recipient, text);
+            }
             messageInput.Clear();
         }
         catch (ChatException ex)
@@ -182,6 +201,9 @@ public class ClientForm : Form
         {
             case MessageType.Chat:
                 AppendChat(message.Timestamp, message.From ?? "?", message.Text ?? string.Empty);
+                break;
+            case MessageType.Private:
+                AppendPrivate(message.Timestamp, message.From ?? "?", message.To ?? "?", message.Text ?? string.Empty);
                 break;
             case MessageType.UserList:
                 UpdateUsers(message.Users ?? new List<string>());
@@ -201,22 +223,73 @@ public class ClientForm : Form
     private void HandleDisconnected(string reason)
     {
         AppendSystem(reason, ErrorColor);
-        usersList.Items.Clear();
-        usersGroup.Text = "Çevrimiçi (0)";
+        UpdateUsers(Array.Empty<string>());
         UpdateState();
     }
 
     private void UpdateUsers(IReadOnlyCollection<string> users)
     {
+        onlineUsers.Clear();
+        onlineUsers.AddRange(users);
+
         usersList.BeginUpdate();
         usersList.Items.Clear();
         foreach (string user in users)
         {
-            bool isMe = string.Equals(user, client.UserName, StringComparison.OrdinalIgnoreCase);
-            usersList.Items.Add(isMe ? $"{user} (siz)" : user);
+            usersList.Items.Add(IsMe(user) ? $"{user} (siz)" : user);
         }
         usersList.EndUpdate();
         usersGroup.Text = $"Çevrimiçi ({users.Count})";
+
+        string? previous = SelectedRecipient;
+        recipientCombo.BeginUpdate();
+        recipientCombo.Items.Clear();
+        recipientCombo.Items.Add(UserNameRules.Everyone);
+        foreach (string user in users.Where(u => !IsMe(u)))
+        {
+            recipientCombo.Items.Add(user);
+        }
+        recipientCombo.EndUpdate();
+
+        int index = previous is null ? 0 : recipientCombo.Items.IndexOf(previous);
+        if (index < 0)
+        {
+            if (client.IsConnected)
+            {
+                AppendSystem($"{previous} çevrimdışı oldu; alıcı \"{UserNameRules.Everyone}\" olarak değiştirildi.", SystemColor);
+            }
+            index = 0;
+        }
+        recipientCombo.SelectedIndex = index;
+        UpdateSendHint();
+    }
+
+    /// <summary>Seçili özel mesaj alıcısı; herkese gönderimde null.</summary>
+    private string? SelectedRecipient =>
+        recipientCombo.SelectedIndex > 0 ? recipientCombo.SelectedItem as string : null;
+
+    private bool IsMe(string userName) =>
+        string.Equals(userName, client.UserName, StringComparison.OrdinalIgnoreCase);
+
+    private void SelectRecipientFromList()
+    {
+        int index = usersList.SelectedIndex;
+        if (index < 0 || index >= onlineUsers.Count || IsMe(onlineUsers[index]))
+        {
+            return;
+        }
+
+        recipientCombo.SelectedItem = onlineUsers[index];
+        messageInput.Focus();
+    }
+
+    private void UpdateSendHint()
+    {
+        string? recipient = SelectedRecipient;
+        messageInput.PlaceholderText = recipient is null
+            ? "Mesajınızı yazıp Enter'a basın..."
+            : $"{recipient} kullanıcısına özel mesaj...";
+        sendButton.Text = recipient is null ? "Gönder" : "Özel Gönder";
     }
 
     private void UpdateState()
@@ -231,6 +304,7 @@ public class ClientForm : Form
         disconnectButton.Enabled = connected;
         messageInput.Enabled = connected;
         sendButton.Enabled = connected;
+        recipientCombo.Enabled = connected;
 
         if (connecting)
         {
@@ -260,9 +334,17 @@ public class ClientForm : Form
         ScrollToEnd();
     }
 
+    private void AppendPrivate(DateTime time, string from, string to, string text)
+    {
+        AppendText($"[{time:HH:mm:ss}] ", Color.DarkGray, FontStyle.Regular);
+        AppendText(IsMe(from) ? $"(özel) siz → {to}: " : $"(özel) {from} → siz: ", PrivateColor, FontStyle.Bold);
+        AppendText(text + Environment.NewLine, PrivateColor, FontStyle.Italic);
+        ScrollToEnd();
+    }
+
     private Color ColorForUser(string userName)
     {
-        if (string.Equals(userName, client.UserName, StringComparison.OrdinalIgnoreCase))
+        if (IsMe(userName))
         {
             return Color.RoyalBlue;
         }

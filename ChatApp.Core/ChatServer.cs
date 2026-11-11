@@ -259,10 +259,46 @@ public sealed class ChatServer : IDisposable
                 await BroadcastAsync(chat).ConfigureAwait(false);
                 break;
 
+            case MessageType.Private:
+                await HandlePrivateAsync(session, message).ConfigureAwait(false);
+                break;
+
             default:
                 OnLog($"{from}: desteklenmeyen mesaj türü ({message.Type}).");
                 break;
         }
+    }
+
+    private async Task HandlePrivateAsync(Session sender, ChatMessage message)
+    {
+        string from = sender.Info.UserName;
+        if (!UserNameRules.IsValidMessage(message.Text, out string error))
+        {
+            await TrySendAsync(sender, ChatMessage.System(error)).ConfigureAwait(false);
+            return;
+        }
+
+        Session? target;
+        lock (sync)
+        {
+            sessions.TryGetValue(message.To ?? string.Empty, out target);
+        }
+
+        if (target is null || !target.Ready)
+        {
+            await TrySendAsync(sender, ChatMessage.System($"\"{message.To}\" adlı kullanıcı çevrimiçi değil.")).ConfigureAwait(false);
+            return;
+        }
+
+        if (target == sender)
+        {
+            await TrySendAsync(sender, ChatMessage.System("Kendinize özel mesaj gönderemezsiniz.")).ConfigureAwait(false);
+            return;
+        }
+
+        var privateMessage = ChatMessage.Private(from, target.Info.UserName, message.Text!.Trim());
+        OnLog($"[Özel] {from} → {target.Info.UserName} ({privateMessage.Text!.Length} karakter)");
+        await Task.WhenAll(TrySendAsync(target, privateMessage), TrySendAsync(sender, privateMessage)).ConfigureAwait(false);
     }
 
     private async Task RemoveSessionAsync(Session session)

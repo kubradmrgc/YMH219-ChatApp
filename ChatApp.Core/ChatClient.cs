@@ -95,6 +95,17 @@ public sealed class ChatClient : IDisposable
         return SendValidatedAsync(text, t => ChatMessage.Chat(UserName!, t));
     }
 
+    /// <summary>Yalnızca <paramref name="to"/> kullanıcısının göreceği özel mesaj gönderir.</summary>
+    public Task SendPrivateAsync(string to, string text)
+    {
+        if (string.IsNullOrWhiteSpace(to))
+        {
+            throw new ChatException("Özel mesaj için alıcı seçilmelidir.");
+        }
+
+        return SendValidatedAsync(text, t => ChatMessage.Private(UserName!, to, t));
+    }
+
     private async Task SendValidatedAsync(string text, Func<string, ChatMessage> create)
     {
         MessageChannel current = channel ?? throw new ChatException("Sunucuya bağlı değilsiniz.");
