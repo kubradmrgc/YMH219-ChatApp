@@ -1,0 +1,191 @@
+using System.Net.Sockets;
+
+namespace ChatApp.Core;
+
+/// <summary>
+/// TcpClient ile sunucuya bağlanan sohbet istemcisi. Olaylar arka plan iş parçacıklarından tetiklenir.
+/// </summary>
+public sealed class ChatClient : IDisposable
+{
+    public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
+
+    private MessageChannel? channel;
+    private CancellationTokenSource? cts;
+    private volatile bool leaving;
+
+    /// <summary>Sunucudan gelen her mesaj için tetiklenir (katılım onayı hariç).</summary>
+    public event Action<ChatMessage>? MessageReceived;
+
+    /// <summary>Kurulmuş bir bağlantı kapandığında bir kez tetiklenir. Parametre: kapanma sebebi.</summary>
+    public event Action<string>? Disconnected;
+
+    public bool IsConnected => channel is not null;
+
+    public string? UserName { get; private set; }
+
+    /// <summary>
+    /// Sunucuya bağlanır ve kullanıcı adıyla katılır. Başarısız olursa <see cref="ChatException"/> fırlatır.
+    /// </summary>
+    public async Task ConnectAsync(string host, int port, string userName, CancellationToken cancellationToken = default)
+    {
+        if (IsConnected)
+        {
+            throw new ChatException("Zaten bağlısınız.");
+        }
+
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            throw new ChatException("Sunucu adresi boş olamaz.");
+        }
+
+        userName = userName.Trim();
+        if (!UserNameRules.IsValid(userName, out string error))
+        {
+            throw new ChatException(error);
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(ConnectTimeout);
+
+        var tcp = new TcpClient();
+        MessageChannel? newChannel = null;
+        try
+        {
+            await tcp.ConnectAsync(host.Trim(), port, timeout.Token).ConfigureAwait(false);
+            newChannel = new MessageChannel(tcp);
+            await newChannel.SendAsync(ChatMessage.Join(userName), timeout.Token).ConfigureAwait(false);
+
+            ChatMessage? reply = await newChannel.ReceiveAsync(timeout.Token).ConfigureAwait(false);
+            switch (reply?.Type)
+            {
+                case MessageType.Accept:
+                    break;
+                case MessageType.Reject:
+                    throw new ChatException($"Sunucu katılımı reddetti: {reply.Text}");
+                case null:
+                    throw new ChatException("Sunucu bağlantıyı kapattı.");
+                default:
+                    throw new ChatException("Sunucudan beklenmeyen yanıt alındı.");
+            }
+        }
+        catch (Exception ex) when (ex is not ChatException)
+        {
+            newChannel?.Dispose();
+            tcp.Dispose();
+            throw new ChatException(DescribeConnectError(ex, host, port, cancellationToken), ex);
+        }
+        catch
+        {
+            newChannel?.Dispose();
+            tcp.Dispose();
+            throw;
+        }
+
+        cts?.Dispose();
+        cts = new CancellationTokenSource();
+        channel = newChannel;
+        UserName = userName;
+        leaving = false;
+        _ = ReadLoopAsync(newChannel, cts.Token);
+    }
+
+    /// <summary>Bağlantıyı düzgün şekilde kapatır (sunucuya ayrılma mesajı gönderir).</summary>
+    public async Task DisconnectAsync()
+    {
+        MessageChannel? current = channel;
+        if (current is null)
+        {
+            return;
+        }
+
+        leaving = true;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await current.SendAsync(ChatMessage.Leave(), timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or OperationCanceledException)
+        {
+            // Bağlantı zaten kopmuş olabilir; yine de kapatılır.
+        }
+
+        Close("Bağlantı kesildi.");
+    }
+
+    private async Task ReadLoopAsync(MessageChannel activeChannel, CancellationToken token)
+    {
+        string reason = "Sunucu bağlantıyı kapattı.";
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                ChatMessage? message = await activeChannel.ReceiveAsync(token).ConfigureAwait(false);
+                if (message is null)
+                {
+                    break;
+                }
+
+                MessageReceived?.Invoke(message);
+            }
+        }
+        catch (FormatException)
+        {
+            reason = "Sunucudan geçersiz veri alındı, bağlantı kapatıldı.";
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or OperationCanceledException)
+        {
+            reason = "Sunucu ile bağlantı koptu.";
+        }
+
+        Close(leaving ? "Bağlantı kesildi." : reason);
+    }
+
+    private void Close(string reason)
+    {
+        MessageChannel? current = Interlocked.Exchange(ref channel, null);
+        if (current is null)
+        {
+            return;
+        }
+
+        cts?.Cancel();
+        current.Dispose();
+        Disconnected?.Invoke(reason);
+    }
+
+    private static string DescribeConnectError(Exception ex, string host, int port, CancellationToken userToken)
+    {
+        if (ex is OperationCanceledException)
+        {
+            return userToken.IsCancellationRequested
+                ? "Bağlantı iptal edildi."
+                : $"{host}:{port} adresine {ConnectTimeout.TotalSeconds:0} saniye içinde bağlanılamadı (zaman aşımı).";
+        }
+
+        if (ex is SocketException socketError)
+        {
+            return socketError.SocketErrorCode switch
+            {
+                SocketError.ConnectionRefused => $"{host}:{port} adresinde çalışan bir sunucu bulunamadı. Sunucunun başlatıldığından emin olun.",
+                SocketError.HostNotFound or SocketError.NoData => $"\"{host}\" adresi bulunamadı.",
+                SocketError.TimedOut => $"{host}:{port} adresine bağlanırken zaman aşımı oluştu.",
+                SocketError.NetworkUnreachable or SocketError.HostUnreachable => "Ağa veya sunucuya ulaşılamıyor.",
+                _ => $"Bağlantı hatası: {socketError.Message}"
+            };
+        }
+
+        if (ex is FormatException)
+        {
+            return "Sunucudan geçersiz veri alındı. Bağlandığınız uygulama bu sohbet sunucusu olmayabilir.";
+        }
+
+        return $"Bağlantı hatası: {ex.Message}";
+    }
+
+    public void Dispose()
+    {
+        leaving = true;
+        Close("Bağlantı kesildi.");
+        cts?.Dispose();
+    }
+}
