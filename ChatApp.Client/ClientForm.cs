@@ -54,6 +54,7 @@ public class ClientForm : Form
     private readonly ToolStripStatusLabel statusLabel = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft, Text = "Bağlı değil" };
 
     private readonly List<string> onlineUsers = new();
+    private readonly ChatHistory history = new();
     private bool connecting;
     private bool closingAfterDisconnect;
 
@@ -116,6 +117,8 @@ public class ClientForm : Form
         };
         disconnectButton.Click += async (_, _) => await client.DisconnectAsync();
         usersList.DoubleClick += (_, _) => SelectRecipientFromList();
+        saveHistoryButton.Click += (_, _) => SaveHistory();
+        saveHistoryButton.Enabled = false;
         recipientCombo.SelectedIndexChanged += (_, _) => UpdateSendHint();
         userNameInput.KeyDown += async (_, e) =>
         {
@@ -331,7 +334,7 @@ public class ClientForm : Form
         AppendText($"[{time:HH:mm:ss}] ", Color.DarkGray, FontStyle.Regular);
         AppendText($"{from}: ", ColorForUser(from), FontStyle.Bold);
         AppendText(text + Environment.NewLine, Color.Black, FontStyle.Regular);
-        ScrollToEnd();
+        FinishLine(time, $"{from}: {text}");
     }
 
     private void AppendPrivate(DateTime time, string from, string to, string text)
@@ -339,7 +342,7 @@ public class ClientForm : Form
         AppendText($"[{time:HH:mm:ss}] ", Color.DarkGray, FontStyle.Regular);
         AppendText(IsMe(from) ? $"(özel) siz → {to}: " : $"(özel) {from} → siz: ", PrivateColor, FontStyle.Bold);
         AppendText(text + Environment.NewLine, PrivateColor, FontStyle.Italic);
-        ScrollToEnd();
+        FinishLine(time, $"(özel) {from} → {to}: {text}");
     }
 
     private Color ColorForUser(string userName)
@@ -356,9 +359,10 @@ public class ClientForm : Form
 
     private void AppendSystem(string text, Color color, DateTime? time = null)
     {
-        AppendText($"[{time ?? DateTime.Now:HH:mm:ss}] ", Color.DarkGray, FontStyle.Regular);
+        DateTime when = time ?? DateTime.Now;
+        AppendText($"[{when:HH:mm:ss}] ", Color.DarkGray, FontStyle.Regular);
         AppendText(text + Environment.NewLine, color, FontStyle.Italic);
-        ScrollToEnd();
+        FinishLine(when, $"* {text}");
     }
 
     private void AppendText(string text, Color color, FontStyle style)
@@ -370,10 +374,38 @@ public class ClientForm : Form
         chatBox.AppendText(text);
     }
 
-    private void ScrollToEnd()
+    private void FinishLine(DateTime time, string plainText)
     {
+        history.Add(time, plainText);
+        saveHistoryButton.Enabled = true;
         chatBox.SelectionStart = chatBox.TextLength;
         chatBox.ScrollToCaret();
+    }
+
+    private void SaveHistory()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Mesaj Geçmişini Kaydet",
+            Filter = "Metin dosyası (*.txt)|*.txt|Tüm dosyalar (*.*)|*.*",
+            FileName = ChatHistory.SuggestFileName(client.UserName, DateTime.Now),
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            history.Save(dialog.FileName, client.UserName, $"{hostInput.Text.Trim()}:{portInput.Value}");
+            statusLabel.Text = $"Geçmiş kaydedildi: {dialog.FileName} ({history.Count} satır)";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(this, $"Dosya kaydedilemedi.\n\n{ex.Message}", "Kayıt Hatası", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
     }
 
     private void RunOnUi(Action action)
