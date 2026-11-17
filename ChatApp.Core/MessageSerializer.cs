@@ -2,10 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace ChatApp.Core;
-
-/// <summary>
-/// Mesajları tek satırlık JSON metnine çevirir. Her mesaj ağ akışında bir satır olarak gönderilir.
-/// </summary>
 public static class MessageSerializer
 {
     private static readonly JsonSerializerOptions Options = new()
@@ -19,8 +15,6 @@ public static class MessageSerializer
         ArgumentNullException.ThrowIfNull(message);
         return JsonSerializer.Serialize(message, Options);
     }
-
-    /// <summary>Bir satırı mesaja çevirir; geçersiz içerikte <see cref="FormatException"/> fırlatır.</summary>
     public static ChatMessage Deserialize(string line)
     {
         if (string.IsNullOrWhiteSpace(line))

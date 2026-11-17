@@ -1,10 +1,6 @@
 using System.Net.Sockets;
 
 namespace ChatApp.Core;
-
-/// <summary>
-/// TcpClient ile sunucuya bağlanan sohbet istemcisi. Olaylar arka plan iş parçacıklarından tetiklenir.
-/// </summary>
 public sealed class ChatClient : IDisposable
 {
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
@@ -12,20 +8,12 @@ public sealed class ChatClient : IDisposable
     private MessageChannel? channel;
     private CancellationTokenSource? cts;
     private volatile bool leaving;
-
-    /// <summary>Sunucudan gelen her mesaj için tetiklenir (katılım onayı hariç).</summary>
     public event Action<ChatMessage>? MessageReceived;
-
-    /// <summary>Kurulmuş bir bağlantı kapandığında bir kez tetiklenir. Parametre: kapanma sebebi.</summary>
     public event Action<string>? Disconnected;
 
     public bool IsConnected => channel is not null;
 
     public string? UserName { get; private set; }
-
-    /// <summary>
-    /// Sunucuya bağlanır ve kullanıcı adıyla katılır. Başarısız olursa <see cref="ChatException"/> fırlatır.
-    /// </summary>
     public async Task ConnectAsync(string host, int port, string userName, CancellationToken cancellationToken = default)
     {
         if (IsConnected)
@@ -88,14 +76,10 @@ public sealed class ChatClient : IDisposable
         leaving = false;
         _ = ReadLoopAsync(newChannel, cts.Token);
     }
-
-    /// <summary>Herkese açık sohbet mesajı gönderir. Hata durumunda <see cref="ChatException"/> fırlatır.</summary>
     public Task SendChatAsync(string text)
     {
         return SendValidatedAsync(text, t => ChatMessage.Chat(UserName!, t));
     }
-
-    /// <summary>Yalnızca <paramref name="to"/> kullanıcısının göreceği özel mesaj gönderir.</summary>
     public Task SendPrivateAsync(string to, string text)
     {
         if (string.IsNullOrWhiteSpace(to))
@@ -123,8 +107,6 @@ public sealed class ChatClient : IDisposable
             throw new ChatException("Mesaj gönderilemedi: sunucu ile bağlantı koptu.", ex);
         }
     }
-
-    /// <summary>Bağlantıyı düzgün şekilde kapatır (sunucuya ayrılma mesajı gönderir).</summary>
     public async Task DisconnectAsync()
     {
         MessageChannel? current = channel;

@@ -1,10 +1,6 @@
 using System.Text;
 
 namespace ChatApp.Core;
-
-/// <summary>
-/// İstemcide görüntülenen mesajların düz metin kaydı; dosyaya kaydedilebilir.
-/// </summary>
 public sealed class ChatHistory
 {
     private readonly List<string> lines = new();
@@ -19,11 +15,6 @@ public sealed class ChatHistory
     }
 
     public void Clear() => lines.Clear();
-
-    /// <summary>
-    /// Geçmişi başlık bilgisiyle birlikte UTF-8 metin dosyasına yazar.
-    /// Dosya hatalarında <see cref="IOException"/> veya <see cref="UnauthorizedAccessException"/> fırlatır.
-    /// </summary>
     public void Save(string path, string? userName, string? server)
     {
         using var writer = new StreamWriter(path, append: false, Encoding.UTF8);

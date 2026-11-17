@@ -2,17 +2,9 @@ using System.Net;
 using System.Net.Sockets;
 
 namespace ChatApp.Core;
-
-/// <summary>
-/// TcpListener ile istemci bağlantılarını kabul eden ve mesajları dağıtan sohbet sunucusu.
-/// Olaylar arka plan iş parçacıklarından tetiklenir.
-/// </summary>
 public sealed class ChatServer : IDisposable
 {
-    /// <summary>Bağlanan istemcinin kullanıcı adını göndermesi için tanınan süre.</summary>
     public static readonly TimeSpan JoinTimeout = TimeSpan.FromSeconds(10);
-
-    /// <summary>Tek bir istemciye mesaj yazmak için beklenecek en uzun süre.</summary>
     public static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
 
     private readonly object sync = new();
@@ -40,8 +32,6 @@ public sealed class ChatServer : IDisposable
             }
         }
     }
-
-    /// <summary>Dinlemeyi başlatır. Port kullanımdaysa <see cref="SocketException"/> fırlatır.</summary>
     public void Start(IPAddress address, int port)
     {
         if (IsRunning)
@@ -375,8 +365,6 @@ public sealed class ChatServer : IDisposable
 
         public MessageChannel Channel { get; }
         public ClientInfo Info { get; }
-
-        /// <summary>Kabul mesajı gönderildikten sonra true olur; o ana kadar yayın almaz.</summary>
         public volatile bool Ready;
     }
 }

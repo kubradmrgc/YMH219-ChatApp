@@ -4,10 +4,6 @@ using System.Net.Sockets;
 using ChatApp.Core;
 
 namespace ChatApp.Server;
-
-/// <summary>
-/// Sunucu penceresi: dinleme ayarları, bağlı istemci listesi ve sunucu günlüğü.
-/// </summary>
 public class ServerForm : Form
 {
     private const int MaxLogLines = 1000;

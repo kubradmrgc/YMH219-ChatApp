@@ -1,10 +1,6 @@
 using ChatApp.Core;
 
 namespace ChatApp.Client;
-
-/// <summary>
-/// İstemci penceresi: bağlantı ayarları, mesaj alanı, çevrimiçi kullanıcılar ve mesaj gönderme.
-/// </summary>
 public class ClientForm : Form
 {
     private static readonly Color SystemColor = Color.Gray;
@@ -266,8 +262,6 @@ public class ClientForm : Form
         recipientCombo.SelectedIndex = index;
         UpdateSendHint();
     }
-
-    /// <summary>Seçili özel mesaj alıcısı; herkese gönderimde null.</summary>
     private string? SelectedRecipient =>
         recipientCombo.SelectedIndex > 0 ? recipientCombo.SelectedItem as string : null;
 

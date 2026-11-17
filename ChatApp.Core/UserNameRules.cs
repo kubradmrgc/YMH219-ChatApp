@@ -1,15 +1,9 @@
 namespace ChatApp.Core;
-
-/// <summary>
-/// Kullanıcı adı ve mesaj metni için ortak kurallar. Hem istemci hem sunucu aynı kuralları uygular.
-/// </summary>
 public static class UserNameRules
 {
     public const int MinLength = 3;
     public const int MaxLength = 20;
     public const int MaxMessageLength = 500;
-
-    /// <summary>Alıcı listesinde "herkese" anlamında kullanıldığı için kullanıcı adı olarak alınamaz.</summary>
     public const string Everyone = "Herkes";
 
     private static readonly string[] Reserved = { Everyone, "Sunucu", "Server" };
